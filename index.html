@@ -1,0 +1,459 @@
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="performance.js"></script>
+    <title>ASCII</title>
+</head>
+<body>
+    <!-- <img id="lena-image" src="https://upload.wikimedia.org/wikipedia/en/7/7d/Lenna_%28test_image%29.png" alt="Lena" style="visibility: hidden;"> -->
+    <div style="display: flex;">
+        <canvas id="lena-canvas" style="display: none;"></canvas>
+        <pre id="lena-ascii"></pre>
+    </div>
+    <script>
+
+        perf();
+
+        // Script
+
+        // Global public constants.
+        const fontFamily = "Consolas",
+            // TODO: if lineHeight and letterSpacing fine tuning doesn't work, change these constants to string with units ("12px", "0.8em"...)
+            fontSize = 4, // px
+            lineHeight = 0.8, // em
+            letterSpacing = 0, // em
+            asciiVariety = 100; // %
+
+        // TODO:
+        // - levels of grey
+
+        // Global objects.
+        let img,
+            canvas,
+            context,
+            render;
+
+        window.onload = () => {
+            setupImage();
+        }
+
+        /**
+         * Sets up the image object.
+         */
+        const setupImage = () => {
+            img = new Image;
+            img.crossOrigin = "Anonymous";
+            // img.src = "https://upload.wikimedia.org/wikipedia/en/7/7d/Lenna_%28test_image%29.png";
+            img.src = "https://i.imgur.com/s4ITte7.jpg";
+            // img.src = "https://i.imgur.com/E3M6hNM.png";
+            // img.src = "https://i.imgur.com/Bk0nFbr.png";
+            img.addEventListener("load", () => {
+                setupCanvas();
+            }, false);
+        }
+
+        /**
+         * Sets up the canvas element (with the real image).
+         */
+        const setupCanvas = () => {
+            canvas = document.querySelector("#lena-canvas");
+            canvas.width = img.width;
+            canvas.height = img.height;
+
+            context = canvas.getContext("2d");
+            context.drawImage(img, 0, 0);
+
+            try {
+                localStorage.setItem("saved-image-example", canvas.toDataURL("image/png"));
+                setupRender();
+            }
+            catch(e) {
+                console.log(e);
+            }
+        }
+
+        /**
+         * Sets up the rendering area.
+         */
+        const setupRender = () => {
+            render = document.querySelector("#lena-ascii");
+            render.style.width = `${img.width}px`;
+            render.style.height = `${img.height}px`;
+            render.style.fontFamily = fontFamily;
+            render.style.fontSize = `${fontSize}px`;
+            render.style.lineHeight = `${lineHeight}em`;
+            render.style.border = "1px solid lightgrey";
+
+            // Calibrates the rendering area by calculating how many rows and
+            // columns are needed to render the ASCII art at the right dimensions.
+            const result = calibrate(img.width, img.height, fontFamily, fontSize, letterSpacing, lineHeight),
+                char = result.char,
+                cols = result.cols,
+                rows = result.rows;
+
+            // Gets the whole raw image data.
+            const rawImageData = context.getImageData(0, 0, canvas.width, canvas.height).data;
+
+            // Builds an organized image data matrix, that is easily readable.
+            const imageData = [];
+            let index = 0;
+
+            // Inits the matrix.
+            for (let x = 0; x < canvas.width; x++) {
+                imageData[x] = [];
+            }
+
+            // Fill it with data.
+            for (let y = 0; y < canvas.height; y++) {
+                for (let x = 0; x < canvas.width; x++) {
+                    imageData[x][y] = [rawImageData[index], rawImageData[index + 1], rawImageData[index + 2]];
+                    index += 4;
+                }
+            }
+
+            // console.log(rawImageData);
+            // console.log(imageData);
+
+            // Builds the matrix of average luminance.
+            let avgLuminanceMatrix = [],
+                x = 0,
+                y = 0;
+
+            // For each cols.
+            for (let xi = 0; xi < cols; xi++) {
+                let r, // Average RED pixel color of the current rectangle.
+                    g,
+                    b;
+
+                avgLuminanceMatrix[xi] = [];
+                
+                // For each rows.
+                for (let yi = 0; yi < rows; yi++) {
+
+                    let rectX = Math.floor(x), // Rectangle current position.
+                        rectY = Math.floor(y),
+                        rectR = [], // Array of all RED pixel values from the current rectangle.
+                        rectG = [],
+                        rectB = [];
+
+                    // For each columns pixels in the current rectangle.
+                    for (let rectXi = 0; rectXi < char.width; rectXi++) {
+
+                        // For each rows pixels in the current rectangle.
+                        for (let rectYi = 0; rectYi < char.height; rectYi++) {
+                            rectR.push(imageData[rectX][rectY][0]);
+                            rectG.push(imageData[rectX][rectY][1]);
+                            rectB.push(imageData[rectX][rectY][2]);
+                            rectY++;
+                        }
+
+                        rectY = Math.round(y);
+                        rectX++;
+                    }
+
+                    // Gets the average color of all pixels on the selected zone (the size of an ASCII char).
+                    r = Math.round(rectR.reduce((a,v,i)=>(a*i+v)/(i+1)));
+                    g = Math.round(rectG.reduce((a,v,i)=>(a*i+v)/(i+1)));
+                    b = Math.round(rectB.reduce((a,v,i)=>(a*i+v)/(i+1)));
+
+                    // Adds the average luminance to the matrix.
+                    avgLuminanceMatrix[xi][yi] = RGBtoHSL(r, g, b)[2];
+
+                    y += char.height;
+                    y = Math.round(y * 100) / 100;
+                }
+                
+                y = 0;
+                x += char.width;
+                x = Math.round(x * 100) / 100;
+            }
+
+            renderImage(avgLuminanceMatrix, cols, rows);
+        }
+
+        // Method 1
+
+        const renderImage = (avgLuminanceMatrix, cols, rows) => {
+            // This array was calculated by the `orderASCIIByDarkness` function.
+            let asciiArray = [" ", "@"];
+
+            asciiArray = asciiArray.reverse();
+
+            /**
+             * Gets the right ASCII character depending of its luminance.
+             */
+            const getAsciiCharacterFromLuminance = (luminance) => {
+                return asciiArray[Math.round((asciiArray.length - 1) * (luminance / 100))];
+            };
+
+            let asciiString = "";
+
+            // Fills up the ASCII string.
+            for (let y = 0; y < rows; y++) {
+                for (let x = 0; x < cols; x++) {
+                    asciiString += getAsciiCharacterFromLuminance(avgLuminanceMatrix[x][y]);
+                }
+                asciiString += "\n";
+            }
+
+            // Displays the string.
+            render.innerText = asciiString;
+
+            perf();
+            perfLog();
+        }
+
+        // Method 2
+
+        // const renderImage = (avgLuminanceMatrix, cols, rows) => {
+        //     let asciiArray = [
+        //             ["&nbsp;"],
+        //             ["`", ".", "'", ","],
+        //             ["i", "s", "z"],
+        //             ["I", "3", "2", "V"],
+        //             ["W", "M", "N", "B", "$"]
+        //         ];
+
+        //     asciiArray = asciiArray.reverse();
+
+        //     const getAsciiCharacterFromLuminance = (luminance) => {
+        //         return asciiArray[Math.round((asciiArray.length - 1) * (luminance / 100))];
+        //     };
+
+        //     let asciiString = "";
+        //     for (let y = 0; y < rows; y++) {
+        //         for (let x = 0; x < cols; x++) {
+        //             // console.log(y);
+        //             let chosenCharset = getAsciiCharacterFromLuminance(avgLuminanceMatrix[x][y])
+        //             asciiString += chosenCharset[randomIntFromInterval(0, chosenCharset.length - 1)];
+        //         }
+        //         asciiString += "\n";
+        //     }
+
+        //     render.innerText = asciiString;
+
+        //     perf();
+        //     perfLog();
+        // }
+
+        /**
+         * Calculates the right character width and height needed to perfectly fill up the rendering
+         * area by filling up a temporary character matrix and getting the real character dimensions.
+         */
+        const calibrate = (width, height, fontFamily, fontSize, letterSpacing, lineHeight) => {
+            let rows = 100, // Number of rows which test the calibration's precision.
+                cols = 100; // Same for columns.
+
+            let calibratingArea = document.createElement("div");
+            calibratingArea.setAttribute("id", "calibratingArea");
+            calibratingArea.style.border = "1px solid lightgrey";
+            calibratingArea.style.fontFamily = fontFamily;
+            calibratingArea.style.fontSize = `${fontSize}px`;
+            calibratingArea.style.letterSpacing = `${letterSpacing}em`;
+            calibratingArea.style.lineHeight = `${lineHeight}em`;
+            calibratingArea.style.display = "inline-block";
+
+            document.querySelector("body").appendChild(calibratingArea);
+
+            // Step 1: generate a character matrix with default values to get an idea
+            // of how much characters are needed to fit the given height and width.
+            fillMatrix();
+
+            let char = {
+                width: calibratingArea.clientWidth / rows,
+                height: calibratingArea.clientHeight / cols
+            }
+
+            // Step 2: calculate the right number of rows and columns needed to fill up the calibrating area.
+            // We round the numbers at their base (1.7 is rounded to 1) so the cols/rows do not overflow the given height or width.
+            rows = Math.floor(height / char.height),
+            cols = Math.floor(width / char.width);
+
+            calibratingArea.remove();
+
+            return {
+                char: char,
+                rows: rows,
+                cols: cols
+            }
+
+            // Step 3: now and we know the right number of rows and columns needed, we need to calculate the right line-height
+            // and letter-spacing needed to fill up the remaining spacing between the right side of the matrix and
+            // the calibrating area, and same for the bottom side.
+            // We will use a 'while' loop to get to a precision of about 1 pixel.
+
+            // /!\ Apparently, adjusting very thinly the letter-spacing and line-height is not working.
+            // These properties do not take thin values into account...
+
+            // Call the matrix once before starting the actual calibration.
+            // fillMatrix();
+
+            // let security = 0;
+            // while (Math.round(calibratingArea.clientWidth) < width && Math.round(calibratingArea.clientHeight) < height) {
+            //     if (Math.round(calibratingArea.clientWidth) < width) {
+            //         letterSpacing += 0.001;
+            //     }
+            //     if (Math.round(calibratingArea.clientHeight) < height) {
+            //         lineHeight += 0.009;
+            //     }
+            //     // Sets the news values.
+            //     calibratingArea.style.letterSpacing = `${letterSpacing}em`;
+            //     calibratingArea.style.lineHeight = `${lineHeight}em`;
+            //     // Fills the calibrating area.
+            //     fillMatrix();
+
+            //     console.log("letter-spacing", letterSpacing, "line-height", lineHeight, calibratingArea.clientWidth, calibratingArea.clientHeight);
+
+            //     security++;
+            //     if (security >= 100) break;
+            // }
+
+            function fillMatrix() {
+                let str = "";
+
+                for (let i = 0; i < rows; i++) {
+                    str += i ? "<br>" : "";
+                    for (let y = 0; y < cols; y++) {
+                        str += "0";
+                    }
+                }
+                
+                calibratingArea.innerHTML = str;
+            }
+        };
+
+        // Utils
+        const RGBtoHSL = (r, g, b) => {
+            // see https://en.wikipedia.org/wiki/HSL_and_HSV#Formal_derivation
+            // convert r,g,b [0,255] range to [0,1]
+            r = r / 255,
+            g = g / 255,
+            b = b / 255;
+            // get the min and max of r,g,b
+            var max = Math.max(r, g, b);
+            var min = Math.min(r, g, b);
+            // lightness is the average of the largest and smallest color components
+            var lum = (max + min) / 2;
+            var hue;
+            var sat;
+            if (max == min) { // no saturation
+                hue = 0;
+                sat = 0;
+            } else {
+                var c = max - min; // chroma
+                // saturation is simply the chroma scaled to fill
+                // the interval [0, 1] for every combination of hue and lightness
+                sat = c / (1 - Math.abs(2 * lum - 1));
+                switch(max) {
+                    case r:
+                        hue = (g - b) / c;
+                        // hue = ((g - b) / c) % 6;
+                        // hue = (g - b) / c + (g < b ? 6 : 0);
+                        break;
+                    case g:
+                        hue = (b - r) / c + 2;
+                        break;
+                    case b:
+                        hue = (r - g) / c + 4;
+                        break;
+                }
+            }
+            hue = Math.round(hue * 60); // °
+            sat = Math.round(sat * 100); // %
+            lum = Math.round(lum * 100); // %
+            return [hue, sat, lum];
+        }
+
+        function round(number) {
+            return Math.round(number * 100) / 100;
+        }
+
+        function randomIntFromInterval(min, max) {
+            return Math.floor(Math.random() * (max - min + 1) + min)
+        }
+
+
+        /**
+         * Orders the given ASCII characters from the clearest to the darkness.
+         * 
+         * Ex: '.' (dot) has is clearer than '0' (zero) since it has less dark pixels.
+         * 
+         * |Original string (for single quote escaping):
+         * |0123456789 !"#$%&\'()*+,-./:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~
+         * |
+         * |Sorted string (for single quote escaping):
+         * | `.\'-_:,"^~;><!=*\\/+?rc|L)(vT7isz]}J{[ltxYFnufC1jI3o2y5eaSkVhEPZwK4UX96pqbdmAHGR#OD%8WMNB$0gQ&@
+         */
+        function orderASCIIByDarkness() {
+            let canvas = document.createElement("canvas"),
+                ctx = canvas.getContext("2d"),
+                // String is slower than array, but easier to read and update.
+                s = '0123456789 !"#$%&\'()*+,-./:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~',
+                // s = ' `.\'-_:,"^~;><!=*\\/+?rc|L)(vT7isz]}J{[ltxYFnufC1jI3o2y5eaSkVhEPZwK4UX96pqbdmAHGR#OD%8WMNB$0gQ&@',
+                // s = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", " ", "!", "\"", "#", "$", "%", "&", "'", "(", ")", "*", "+", ",", "-", ".", "/", ":", ";", "<", "=", ">", "?", "@", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "[", "\\", "]", "^", "_", "`", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "{", "|", "}", "~"],
+                // s = '0',
+                sortedCharacters = [];
+
+            canvas.height = 220;
+            canvas.width = 130;
+            canvas.style.border = "1px solid lightgrey";
+            ctx.font = "230px Consolas";
+            document.querySelector("body").appendChild(canvas);
+
+            for (let i = 0; i < s.length; i++) {
+            // for (let i = 0; i < 15; i++) {
+                let char = s[i];
+                // Appends the character.
+                ctx.fillText(char, 0, 180);
+                // Gets the lumiance points of the current caracter and adds them to an array..
+                sortedCharacters.push([char, getLuminancePoints()]);
+                // Resets the canvas.
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+            }
+
+            // Sorts the array by character points.
+            sortedCharacters.sort(function(a, b) {
+                return a[1] - b[1];
+            });
+
+            // Creates an array of the sorted caracters only.
+            sortedCharacters = sortedCharacters.map(([char, value]) => char);
+
+            // Creates a string.
+            // let sortedString = "";
+            // for (let i = 0; i < sortedCharacters.length; i++) {
+            //     sortedString += sortedCharacters[i];
+            // }
+
+            // Returns the array and string of sorted characters.
+            console.log(sortedCharacters, sortedCharacters.join());
+
+            /**
+             * Runs through each pixels of the canvas, and totals the luminance of each pixels.
+             * 0 is black, 255 is white. The total is the number of points the character has.
+             * The higher the points total is, the darker the caracter is in average.
+             * 
+             * Ex: '.' (dot) has is clearer than '0' (zero) since it has less dark pixels.
+             * 
+             * @returns {number} Total of points.
+             */
+            function getLuminancePoints() {
+                let points = 0;
+                // For each height pixels.
+                for (let y = 0; y < canvas.height; y++) {
+                    // For each width pixels.
+                    for (let x = 0; x < canvas.width; x++) {
+                        points += ctx.getImageData(x, y, 1, 1).data[3];
+                    }
+                }
+                return points;
+            }
+        }
+
+        // orderASCIIByDarkness();
+        
+    </script>
+</body>
+</html>
