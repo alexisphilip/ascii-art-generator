@@ -1,3 +1,4 @@
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -7,8 +8,8 @@
     <title>ASCII</title>
 </head>
 <body>
-    <!-- <img id="lena-image" src="https://upload.wikimedia.org/wikipedia/en/7/7d/Lenna_%28test_image%29.png" alt="Lena" style="visibility: hidden;"> -->
     <div style="display: flex;">
+        <img id="lena-image" style="margin-right: 16px;">
         <canvas id="lena-canvas" style="display: none;"></canvas>
         <pre id="lena-ascii"></pre>
     </div>
@@ -16,24 +17,33 @@
 
         perf();
 
-        // Script
+        // ######
+        // CONFIG
+        // ######
 
         // Global public constants.
-        const fontFamily = "Consolas",
-            // TODO: if lineHeight and letterSpacing fine tuning doesn't work, change these constants to string with units ("12px", "0.8em"...)
-            fontSize = 4, // px
-            lineHeight = 0.8, // em
-            letterSpacing = 0, // em
-            asciiVariety = 100; // %
+        let imgSrc = "lena.png",
+            fontFamily = "Consolas",
+            fontSize = "8px",
+            lineHeight,
+            letterSpacing,
+            asciiVariety = 50; // Luminance variety. If 100, all ASCII characters. If 20, only 20% of all ASCII characters.
+            // TODO: don't pick characters randomly but proportionally from start to finish,
 
         // TODO:
         // - levels of grey
 
         // Global objects.
-        let img,
+        let imgObj,
             canvas,
             context,
             render;
+
+        // ######
+        // SCRIPT
+        // ######
+
+        lineHeight = lineHeight == null ? fontSize : lineHeight;
 
         window.onload = () => {
             setupImage();
@@ -43,27 +53,32 @@
          * Sets up the image object.
          */
         const setupImage = () => {
-            img = new Image;
-            img.crossOrigin = "Anonymous";
+
+            imgEl = document.querySelector("#lena-image");
+            imgEl.src = imgSrc;
+
+            imgObj = new Image();
+            imgObj.crossOrigin = "Anonymous";
+            imgObj.src = imgSrc;
             // img.src = "https://upload.wikimedia.org/wikipedia/en/7/7d/Lenna_%28test_image%29.png";
-            img.src = "https://i.imgur.com/s4ITte7.jpg";
+            // img.src = "https://i.imgur.com/s4ITte7.jpg";
             // img.src = "https://i.imgur.com/E3M6hNM.png";
             // img.src = "https://i.imgur.com/Bk0nFbr.png";
-            img.addEventListener("load", () => {
+            imgObj.addEventListener("load", () => {
                 setupCanvas();
             }, false);
         }
 
         /**
-         * Sets up the canvas element (with the real image).
+         * Sets up the canvas element (and adds image inside the canvas).
          */
         const setupCanvas = () => {
             canvas = document.querySelector("#lena-canvas");
-            canvas.width = img.width;
-            canvas.height = img.height;
+            canvas.width = imgObj.width;
+            canvas.height = imgObj.height;
 
             context = canvas.getContext("2d");
-            context.drawImage(img, 0, 0);
+            context.drawImage(imgObj, 0, 0);
 
             try {
                 localStorage.setItem("saved-image-example", canvas.toDataURL("image/png"));
@@ -79,16 +94,17 @@
          */
         const setupRender = () => {
             render = document.querySelector("#lena-ascii");
-            render.style.width = `${img.width}px`;
-            render.style.height = `${img.height}px`;
+            render.style.width = `${imgObj.width}px`;
+            render.style.height = `${imgObj.height}px`;
             render.style.fontFamily = fontFamily;
-            render.style.fontSize = `${fontSize}px`;
-            render.style.lineHeight = `${lineHeight}em`;
+            render.style.fontSize = fontSize;
+            render.style.lineHeight = lineHeight;
+            render.style.letterSpacing = letterSpacing;
             render.style.border = "1px solid lightgrey";
 
             // Calibrates the rendering area by calculating how many rows and
             // columns are needed to render the ASCII art at the right dimensions.
-            const result = calibrate(img.width, img.height, fontFamily, fontSize, letterSpacing, lineHeight),
+            const result = calibrate(imgObj.width, imgObj.height, fontFamily, fontSize, lineHeight, letterSpacing),
                 char = result.char,
                 cols = result.cols,
                 rows = result.rows;
@@ -96,14 +112,29 @@
             // Gets the whole raw image data.
             const rawImageData = context.getImageData(0, 0, canvas.width, canvas.height).data;
 
-            // Builds an organized image data matrix, that is easily readable.
+            /**
+             * Contains an organized image data matrix, that is easily readable.
+             * Contains rows, which contains columns, which contains RGB data in it.
+             * It will be used to quickly access the image data to calculate the average
+             * luminance for a square of pixels (ex: each 40px*40px, get average luminance).
+             * @var {array}
+             * @example If the image is 512px * 300px, it will have 300 rows with 512 columns each.
+             * [
+             *   [                  // Each entry is a row
+             *     [87, 130, 187]   // Each entry is a column in a row, which contains RGB data.
+             *     ...
+             *   ],
+             *   ...
+             * ]
+             */
             const imageData = [];
-            let index = 0;
 
             // Inits the matrix.
             for (let x = 0; x < canvas.width; x++) {
                 imageData[x] = [];
             }
+
+            let index = 0;
 
             // Fill it with data.
             for (let y = 0; y < canvas.height; y++) {
@@ -113,30 +144,42 @@
                 }
             }
 
-            // console.log(rawImageData);
-            // console.log(imageData);
-
-            // Builds the matrix of average luminance.
-            let avgLuminanceMatrix = [],
-                x = 0,
+            /**
+             * Builds the matrix of average luminance value for each group of pixels.
+             * @var {array}
+             * @example If the image is 500px * 300px, and rows and cols size are 10px, it will have 30 rows with 50 columns each.
+             * [
+             *   [       // Each entry is a row
+             *     70    // Each entry is a column in a row, which contains the average luminance value.
+             *     ...
+             *   ],
+             *   ...
+             * ]
+             */
+            let avgLuminanceMatrix = [];
+            
+            // Current position in the canvas rectangle.
+            let x = 0,
                 y = 0;
 
-            // For each cols.
+            // For each cols of the rendering area.
             for (let xi = 0; xi < cols; xi++) {
-                let r, // Average RED pixel color of the current rectangle.
-                    g,
-                    b;
 
+                let r, // Average RED pixel color of the current rectangle.
+                    g, // ...     GREEN
+                    b; // ...     BLUE
+
+                // Inits the matrix row.
                 avgLuminanceMatrix[xi] = [];
                 
-                // For each rows.
+                // For each rows of the rendering area.
                 for (let yi = 0; yi < rows; yi++) {
 
-                    let rectX = Math.floor(x), // Rectangle current position.
+                    let rectX = Math.floor(x), // Rectangle's current position.
                         rectY = Math.floor(y),
                         rectR = [], // Array of all RED pixel values from the current rectangle.
-                        rectG = [],
-                        rectB = [];
+                        rectG = [], // ...          GREEN
+                        rectB = []; // ...          BLUE
 
                     // For each columns pixels in the current rectangle.
                     for (let rectXi = 0; rectXi < char.width; rectXi++) {
@@ -177,7 +220,16 @@
 
         const renderImage = (avgLuminanceMatrix, cols, rows) => {
             // This array was calculated by the `orderASCIIByDarkness` function.
-            let asciiArray = [" ", "@"];
+            // let asciiArray = [" ", "@"];
+            let asciiArray = [" ", "`", ".", "'", "-", "_", ":", ",", "\"", "^", "~", ";", ">", "<", "!", "=", "*", "\\", "/", "+", "?", "r", "c", "|", "L", ")", "(", "v", "T", "7", "i", "s", "z", "]", "}", "J", "{", "[", "l", "t", "x", "Y", "F", "n", "u", "f", "C", "1", "j", "I", "3", "o", "2", "y", "5", "e", "a", "S", "k", "V", "h", "E", "P", "Z", "w", "K", "4", "U", "X", "9", "6", "p", "q", "b", "d", "m", "A", "H", "G", "R", "#", "O", "D", "%", "8", "W", "M", "N", "B", "$", "0", "g", "Q", "&", "@"];
+
+            // If 100% is given, remove 0%.
+            // If 75% is given, remove 25%.
+            // If 0% is given, remove 100%.
+            const percentageToRemove = 100 - asciiVariety;
+
+            // Remove N percentage of ASCII elements, to make the color variety smaller or bigger.
+            asciiArray = arrayRemovePercentage(asciiArray, percentageToRemove);
 
             asciiArray = asciiArray.reverse();
 
@@ -242,7 +294,7 @@
          * Calculates the right character width and height needed to perfectly fill up the rendering
          * area by filling up a temporary character matrix and getting the real character dimensions.
          */
-        const calibrate = (width, height, fontFamily, fontSize, letterSpacing, lineHeight) => {
+        const calibrate = (width, height, fontFamily, fontSize, lineHeight, letterSpacing) => {
             let rows = 100, // Number of rows which test the calibration's precision.
                 cols = 100; // Same for columns.
 
@@ -250,9 +302,9 @@
             calibratingArea.setAttribute("id", "calibratingArea");
             calibratingArea.style.border = "1px solid lightgrey";
             calibratingArea.style.fontFamily = fontFamily;
-            calibratingArea.style.fontSize = `${fontSize}px`;
-            calibratingArea.style.letterSpacing = `${letterSpacing}em`;
-            calibratingArea.style.lineHeight = `${lineHeight}em`;
+            calibratingArea.style.fontSize = fontSize;
+            calibratingArea.style.lineHeight = lineHeight;
+            calibratingArea.style.letterSpacing = letterSpacing;
             calibratingArea.style.display = "inline-block";
 
             document.querySelector("body").appendChild(calibratingArea);
@@ -322,6 +374,24 @@
                 
                 calibratingArea.innerHTML = str;
             }
+        };
+
+        const arrayRemovePercentage = (array, percentage) => {
+
+            const arrayCopy = [...array];
+
+            // Calculate the number of items to remove.
+            const totalItemsToRemove = Math.round(arrayCopy.length * percentage / 100);
+
+            // For each items ot remove.
+            for (let i = 0; i < totalItemsToRemove; i++) {
+                // Generate a random index.
+                const index = Math.floor(Math.random() * arrayCopy.length);
+                // Removes the item.
+                arrayCopy.splice(index, 1);
+            }
+
+            return arrayCopy;
         };
 
         // Utils
