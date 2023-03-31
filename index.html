@@ -2,294 +2,53 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <script src="performance.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>ASCII</title>
+    <!-- Bootstrap -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-rbsA2VBKQhggwzxH7pPCaAqO46MgnOM80zW1RWuH61DGLwZJEdK2Kadq2F9CUG65" crossorigin="anonymous">
 </head>
 <body>
-    <div style="display: flex;">
-        <img id="lena-image" style="margin-right: 16px;">
-        <canvas id="lena-canvas" style="display: none;"></canvas>
-        <pre id="lena-ascii"></pre>
+    <div class="container">
+        <h1>ASCII art generator</h1>
+        <div class="row">
+            <div class="col">
+                <div class="mb-3">
+                    <label for="exampleFormControlInput1" class="form-label">Image by URL</label>
+                    <input type="text" class="form-control form-control-sm" id="exampleFormControlInput1">
+                </div>
+                <div class="mb-3">
+                    <label for="formFile" class="form-label">Image on your computer</label>
+                    <input class="form-control form-control-sm" type="file" id="formFile">
+                </div>
+            </div>
+            <div class="col">
+                <label for="fontSize" class="form-label">Font-size</label>
+                <input type="number" id="fontSize" class="form-control">
+            </div>
+            <div class="col">
+                <label for="asciiVariety" class="form-label">ASCII variety</label><br>
+                <!-- <input type="range" id=""> -->
+                <input type="number" id="asciiVariety" class="form-control">
+            </div>
+        </div>
+        <div class="d-flex">
+            <img id="Input" style="margin-right: 16px;">
+            <canvas id="InputCanvas" style="display: none;"></canvas>
+            <pre id="Output"></pre>
+        </div>
     </div>
+
+    <!-- Bootstrap -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-kenU1KFdBIe4zVF0s0G1M5b4hcpxyD9F7jL+jjXkk+Q2h455rYXK/7HAuoJl+0I4" crossorigin="anonymous"></script>
+
+    <!-- Utils -->
+    <script src="performance.js"></script>
+
+    <script src="AsciiArtGenerator.js"></script>
+    <script src="script.js"></script>
+
+    <!-- Utils -->
     <script>
-
-        perf();
-
-        // ######
-        // CONFIG
-        // ######
-
-        // Global public constants.
-        let imgSrc = "lena.png",
-            fontFamily = "Consolas",
-            fontSize = "8px",
-            lineHeight,
-            letterSpacing,
-            asciiVariety = 50; // Luminance variety. If 100, all ASCII characters. If 20, only 20% of all ASCII characters.
-            // TODO: don't pick characters randomly but proportionally from start to finish,
-
-        // TODO:
-        // - levels of grey
-
-        // Global objects.
-        let imgObj,
-            canvas,
-            context,
-            render;
-
-        // ######
-        // SCRIPT
-        // ######
-
-        lineHeight = lineHeight == null ? fontSize : lineHeight;
-
-        window.onload = () => {
-            setupImage();
-        }
-
-        /**
-         * Sets up the image object.
-         */
-        const setupImage = () => {
-
-            imgEl = document.querySelector("#lena-image");
-            imgEl.src = imgSrc;
-
-            imgObj = new Image();
-            imgObj.crossOrigin = "Anonymous";
-            imgObj.src = imgSrc;
-            // img.src = "https://upload.wikimedia.org/wikipedia/en/7/7d/Lenna_%28test_image%29.png";
-            // img.src = "https://i.imgur.com/s4ITte7.jpg";
-            // img.src = "https://i.imgur.com/E3M6hNM.png";
-            // img.src = "https://i.imgur.com/Bk0nFbr.png";
-            imgObj.addEventListener("load", () => {
-                setupCanvas();
-            }, false);
-        }
-
-        /**
-         * Sets up the canvas element (and adds image inside the canvas).
-         */
-        const setupCanvas = () => {
-            canvas = document.querySelector("#lena-canvas");
-            canvas.width = imgObj.width;
-            canvas.height = imgObj.height;
-
-            context = canvas.getContext("2d");
-            context.drawImage(imgObj, 0, 0);
-
-            try {
-                localStorage.setItem("saved-image-example", canvas.toDataURL("image/png"));
-                setupRender();
-            }
-            catch(e) {
-                console.log(e);
-            }
-        }
-
-        /**
-         * Sets up the rendering area.
-         */
-        const setupRender = () => {
-            render = document.querySelector("#lena-ascii");
-            render.style.width = `${imgObj.width}px`;
-            render.style.height = `${imgObj.height}px`;
-            render.style.fontFamily = fontFamily;
-            render.style.fontSize = fontSize;
-            render.style.lineHeight = lineHeight;
-            render.style.letterSpacing = letterSpacing;
-            render.style.border = "1px solid lightgrey";
-
-            // Calibrates the rendering area by calculating how many rows and
-            // columns are needed to render the ASCII art at the right dimensions.
-            const result = calibrate(imgObj.width, imgObj.height, fontFamily, fontSize, lineHeight, letterSpacing),
-                char = result.char,
-                cols = result.cols,
-                rows = result.rows;
-
-            // Gets the whole raw image data.
-            const rawImageData = context.getImageData(0, 0, canvas.width, canvas.height).data;
-
-            /**
-             * Contains an organized image data matrix, that is easily readable.
-             * Contains rows, which contains columns, which contains RGB data in it.
-             * It will be used to quickly access the image data to calculate the average
-             * luminance for a square of pixels (ex: each 40px*40px, get average luminance).
-             * @var {array}
-             * @example If the image is 512px * 300px, it will have 300 rows with 512 columns each.
-             * [
-             *   [                  // Each entry is a row
-             *     [87, 130, 187]   // Each entry is a column in a row, which contains RGB data.
-             *     ...
-             *   ],
-             *   ...
-             * ]
-             */
-            const imageData = [];
-
-            // Inits the matrix.
-            for (let x = 0; x < canvas.width; x++) {
-                imageData[x] = [];
-            }
-
-            let index = 0;
-
-            // Fill it with data.
-            for (let y = 0; y < canvas.height; y++) {
-                for (let x = 0; x < canvas.width; x++) {
-                    imageData[x][y] = [rawImageData[index], rawImageData[index + 1], rawImageData[index + 2]];
-                    index += 4;
-                }
-            }
-
-            /**
-             * Builds the matrix of average luminance value for each group of pixels.
-             * @var {array}
-             * @example If the image is 500px * 300px, and rows and cols size are 10px, it will have 30 rows with 50 columns each.
-             * [
-             *   [       // Each entry is a row
-             *     70    // Each entry is a column in a row, which contains the average luminance value.
-             *     ...
-             *   ],
-             *   ...
-             * ]
-             */
-            let avgLuminanceMatrix = [];
-            
-            // Current position in the canvas rectangle.
-            let x = 0,
-                y = 0;
-
-            // For each cols of the rendering area.
-            for (let xi = 0; xi < cols; xi++) {
-
-                let r, // Average RED pixel color of the current rectangle.
-                    g, // ...     GREEN
-                    b; // ...     BLUE
-
-                // Inits the matrix row.
-                avgLuminanceMatrix[xi] = [];
-                
-                // For each rows of the rendering area.
-                for (let yi = 0; yi < rows; yi++) {
-
-                    let rectX = Math.floor(x), // Rectangle's current position.
-                        rectY = Math.floor(y),
-                        rectR = [], // Array of all RED pixel values from the current rectangle.
-                        rectG = [], // ...          GREEN
-                        rectB = []; // ...          BLUE
-
-                    // For each columns pixels in the current rectangle.
-                    for (let rectXi = 0; rectXi < char.width; rectXi++) {
-
-                        // For each rows pixels in the current rectangle.
-                        for (let rectYi = 0; rectYi < char.height; rectYi++) {
-                            rectR.push(imageData[rectX][rectY][0]);
-                            rectG.push(imageData[rectX][rectY][1]);
-                            rectB.push(imageData[rectX][rectY][2]);
-                            rectY++;
-                        }
-
-                        rectY = Math.round(y);
-                        rectX++;
-                    }
-
-                    // Gets the average color of all pixels on the selected zone (the size of an ASCII char).
-                    r = Math.round(rectR.reduce((a,v,i)=>(a*i+v)/(i+1)));
-                    g = Math.round(rectG.reduce((a,v,i)=>(a*i+v)/(i+1)));
-                    b = Math.round(rectB.reduce((a,v,i)=>(a*i+v)/(i+1)));
-
-                    // Adds the average luminance to the matrix.
-                    avgLuminanceMatrix[xi][yi] = RGBtoHSL(r, g, b)[2];
-
-                    y += char.height;
-                    y = Math.round(y * 100) / 100;
-                }
-                
-                y = 0;
-                x += char.width;
-                x = Math.round(x * 100) / 100;
-            }
-
-            renderImage(avgLuminanceMatrix, cols, rows);
-        }
-
-        // Method 1
-
-        const renderImage = (avgLuminanceMatrix, cols, rows) => {
-            // This array was calculated by the `orderASCIIByDarkness` function.
-            // let asciiArray = [" ", "@"];
-            let asciiArray = [" ", "`", ".", "'", "-", "_", ":", ",", "\"", "^", "~", ";", ">", "<", "!", "=", "*", "\\", "/", "+", "?", "r", "c", "|", "L", ")", "(", "v", "T", "7", "i", "s", "z", "]", "}", "J", "{", "[", "l", "t", "x", "Y", "F", "n", "u", "f", "C", "1", "j", "I", "3", "o", "2", "y", "5", "e", "a", "S", "k", "V", "h", "E", "P", "Z", "w", "K", "4", "U", "X", "9", "6", "p", "q", "b", "d", "m", "A", "H", "G", "R", "#", "O", "D", "%", "8", "W", "M", "N", "B", "$", "0", "g", "Q", "&", "@"];
-
-            // If 100% is given, remove 0%.
-            // If 75% is given, remove 25%.
-            // If 0% is given, remove 100%.
-            const percentageToRemove = 100 - asciiVariety;
-
-            // Remove N percentage of ASCII elements, to make the color variety smaller or bigger.
-            asciiArray = arrayRemovePercentage(asciiArray, percentageToRemove);
-
-            asciiArray = asciiArray.reverse();
-
-            /**
-             * Gets the right ASCII character depending of its luminance.
-             */
-            const getAsciiCharacterFromLuminance = (luminance) => {
-                return asciiArray[Math.round((asciiArray.length - 1) * (luminance / 100))];
-            };
-
-            let asciiString = "";
-
-            // Fills up the ASCII string.
-            for (let y = 0; y < rows; y++) {
-                for (let x = 0; x < cols; x++) {
-                    asciiString += getAsciiCharacterFromLuminance(avgLuminanceMatrix[x][y]);
-                }
-                asciiString += "\n";
-            }
-
-            // Displays the string.
-            render.innerText = asciiString;
-
-            perf();
-            perfLog();
-        }
-
-        // Method 2
-
-        // const renderImage = (avgLuminanceMatrix, cols, rows) => {
-        //     let asciiArray = [
-        //             ["&nbsp;"],
-        //             ["`", ".", "'", ","],
-        //             ["i", "s", "z"],
-        //             ["I", "3", "2", "V"],
-        //             ["W", "M", "N", "B", "$"]
-        //         ];
-
-        //     asciiArray = asciiArray.reverse();
-
-        //     const getAsciiCharacterFromLuminance = (luminance) => {
-        //         return asciiArray[Math.round((asciiArray.length - 1) * (luminance / 100))];
-        //     };
-
-        //     let asciiString = "";
-        //     for (let y = 0; y < rows; y++) {
-        //         for (let x = 0; x < cols; x++) {
-        //             // console.log(y);
-        //             let chosenCharset = getAsciiCharacterFromLuminance(avgLuminanceMatrix[x][y])
-        //             asciiString += chosenCharset[randomIntFromInterval(0, chosenCharset.length - 1)];
-        //         }
-        //         asciiString += "\n";
-        //     }
-
-        //     render.innerText = asciiString;
-
-        //     perf();
-        //     perfLog();
-        // }
-
         /**
          * Calculates the right character width and height needed to perfectly fill up the rendering
          * area by filling up a temporary character matrix and getting the real character dimensions.
@@ -525,5 +284,30 @@
         // orderASCIIByDarkness();
         
     </script>
+    <!-- Main -->
+    <script>
+        
+        const fontSize = 8;
+        document.querySelector("#fontSize").value = fontSize;
+
+        const aag = new AsciiArtGenerator();
+        aag.imgSrc = "lena.png";    
+        aag.fontFamily = "Consolas";
+        aag.fontSize = "8px";
+        aag.lineHeight = `${fontSize}px`;
+        aag.imgWidth = 400;
+        aag.imgHeight = 400;
+        // Luminance variety. If 100, all ASCII characters. If 20, only 20% of all ASCII characters.
+        // TODO: don't pick characters randomly but proportionally from start to finish,
+        aag.asciiVariety = 50;    
+        aag.generate();
+
+        document.querySelector("#fontSize").addEventListener("input", (e) => {
+            aag.fontSize = `${e.currentTarget.value}px`;
+            aag.lineHeight = `${e.currentTarget.value}px`;
+            aag.generate();
+        });
+
+</script>
 </body>
 </html>
